@@ -7,14 +7,14 @@
 // =============================================================================
 
 // -- WiFi Credentials --------------------------------------------------------
-#define WIFI_SSID        "McWifi"
-#define WIFI_PASSWORD    "gonewireless"
+#define WIFI_SSID        "McLab"
+#define WIFI_PASSWORD    "gogogadget"
 
 // -- Pin Assignments ---------------------------------------------------------
 // Power
 #define PIN_HOLD         4    // Must set HIGH to keep device powered on
 
-// Servo PPM outputs (future use)
+// Servo PPM outputs
 #define PIN_SERVO_LEFT   25   // Left wheel servo
 #define PIN_SERVO_RIGHT  26   // Right wheel servo
 
@@ -43,6 +43,25 @@
 #define DISPLAY_UPDATE_MS        200     // 5Hz display refresh rate
 #define DISPLAY_WIDTH            135
 #define DISPLAY_HEIGHT           240
+
+// -- Drive / Servo Settings --------------------------------------------------
+// Servo pulse widths (microseconds)
+#define SERVO_MIN_US             1000    // Full reverse
+#define SERVO_MAX_US             2000    // Full forward
+#define SERVO_CENTER_US          1500    // Stopped / center
+
+// Drive control loop
+#define DRIVE_UPDATE_MS          20      // 50Hz control loop (1000/50 = 20ms)
+
+// Expo curve: 0.0 = linear, 1.0 = full cubic.
+// Blends linear and cubic: out = (1-expo)*in + expo*in^3
+#define DRIVE_EXPO               0.3f
+
+// ESP32 LEDC PWM for servo signals
+#define LEDC_SERVO_LEFT_CH       0       // LEDC channel for left servo
+#define LEDC_SERVO_RIGHT_CH      1       // LEDC channel for right servo
+#define LEDC_SERVO_FREQ          50      // 50Hz = standard servo frequency
+#define LEDC_SERVO_RESOLUTION    16      // 16-bit resolution (65536 steps)
 
 // -- Debug Logging -----------------------------------------------------------
 // Log levels: 0=NONE, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG

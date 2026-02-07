@@ -28,9 +28,9 @@ struct ControllerState {
     int16_t rx;         // Right stick X
     int16_t ry;         // Right stick Y
 
-    // Triggers: 0 to 1023
-    int16_t lt;         // Left trigger (brake)
-    int16_t rt;         // Right trigger (throttle)
+    // Triggers (L2/R2 analog): 0 to 1023
+    int16_t l2;         // Left trigger (L2)
+    int16_t r2;         // Right trigger (R2)
 
     // Button bitmask
     uint16_t buttons;

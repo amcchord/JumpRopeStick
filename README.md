@@ -38,8 +38,8 @@ pio device monitor
 
 Edit `main/config.h`:
 ```cpp
-#define WIFI_SSID     "McWifi"
-#define WIFI_PASSWORD "gonewireless"
+#define WIFI_SSID     "McLab"
+#define WIFI_PASSWORD "gogogadget"
 ```
 
 ## Pairing an 8BitDo Controller

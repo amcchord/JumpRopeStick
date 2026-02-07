@@ -7,6 +7,7 @@
 #include "debug_log.h"
 #include "wifi_manager.h"
 #include "controller_manager.h"
+#include "drive_manager.h"
 
 #include <M5Unified.h>
 
@@ -28,6 +29,7 @@ static M5Canvas sprite(&M5.Display);
 // External references
 extern WiFiManager g_wifiManager;
 extern ControllerManager g_controllerManager;
+extern DriveManager g_driveManager;
 
 void DisplayManager::begin() {
     LOG_INFO(TAG, "Initializing display...");
@@ -103,11 +105,6 @@ void DisplayManager::drawStatusBar(int y) {
         sprite.print("Connecting WiFi...");
     }
 
-    // WebSocket client count (right side)
-    sprite.setTextColor(COLOR_TEXT_DIM);
-    sprite.setTextSize(1);
-    // We'll skip WS count here since we can't easily access it without passing
-    // the web server reference. Keep it simple.
 }
 
 void DisplayManager::drawControllerInfo(int y) {
@@ -166,13 +163,13 @@ void DisplayManager::drawControllerInfo(int y) {
         sprite.print(stickBuf);
         y += 11;
 
-        // Triggers
+        // Triggers (L2/R2)
         sprite.setTextColor(COLOR_TEXT_DIM);
         sprite.setCursor(4, y);
         sprite.print("T:");
         sprite.setTextColor(COLOR_TEXT);
         char trigBuf[24];
-        snprintf(trigBuf, sizeof(trigBuf), "L%4d R%4d", state.lt, state.rt);
+        snprintf(trigBuf, sizeof(trigBuf), "L2%4d R2%4d", state.l2, state.r2);
         sprite.print(trigBuf);
         y += 11;
 
@@ -181,7 +178,7 @@ void DisplayManager::drawControllerInfo(int y) {
         sprite.setCursor(4, y);
         sprite.print("B:");
 
-        const char* btnLabels[] = {"A","B","X","Y","L","R","L3","R3"};
+        const char* btnLabels[] = {"A","B","X","Y","L1","R1","L3","R3"};
         int bx = 20;
         for (int b = 0; b < 8; b++) {
             bool pressed = (state.buttons & (1 << b)) != 0;
@@ -223,18 +220,22 @@ void DisplayManager::drawOutputInfo(int y) {
     sprite.print("OUTPUTS");
     y += 14;
 
-    // Servo values (placeholder)
+    // Servo pulse values from drive manager
     sprite.setTextColor(COLOR_TEXT_DIM);
     sprite.setCursor(4, y);
     sprite.print("SrvL:");
     sprite.setTextColor(COLOR_TEXT);
-    sprite.print("1500");
+    char leftBuf[8];
+    snprintf(leftBuf, sizeof(leftBuf), "%u", g_driveManager.getLeftPulse());
+    sprite.print(leftBuf);
 
     sprite.setTextColor(COLOR_TEXT_DIM);
     sprite.setCursor(70, y);
     sprite.print("SrvR:");
     sprite.setTextColor(COLOR_TEXT);
-    sprite.print("1500");
+    char rightBuf[8];
+    snprintf(rightBuf, sizeof(rightBuf), "%u", g_driveManager.getRightPulse());
+    sprite.print(rightBuf);
 }
 
 void DisplayManager::drawSystemInfo(int y) {

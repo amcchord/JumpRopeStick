@@ -10,6 +10,7 @@
 #include "debug_log.h"
 #include "wifi_manager.h"
 #include "controller_manager.h"
+#include "drive_manager.h"
 #include "web_ui.h"
 
 #include <esp_http_server.h>
@@ -22,6 +23,7 @@ static httpd_handle_t s_server = NULL;
 // External references
 extern WiFiManager g_wifiManager;
 extern ControllerManager g_controllerManager;
+extern DriveManager g_driveManager;
 
 // ---------------------------------------------------------------------------
 // Build JSON status string
@@ -48,17 +50,19 @@ static String buildStatusJson() {
             ctrl["ly"] = state.ly;
             ctrl["rx"] = state.rx;
             ctrl["ry"] = state.ry;
-            ctrl["lt"] = state.lt;
-            ctrl["rt"] = state.rt;
+            ctrl["l2"] = state.l2;
+            ctrl["r2"] = state.r2;
             ctrl["buttons"] = state.buttons;
             ctrl["dpad"] = state.dpad;
         }
     }
 
-    // Servo outputs (placeholder for future use)
+    // Servo / drive outputs
     JsonObject servos = doc["servos"].to<JsonObject>();
-    servos["left"] = 1500;
-    servos["right"] = 1500;
+    servos["left"] = g_driveManager.getLeftPulse();
+    servos["right"] = g_driveManager.getRightPulse();
+    servos["leftDrive"] = serialized(String(g_driveManager.getLeftDrive(), 2));
+    servos["rightDrive"] = serialized(String(g_driveManager.getRightDrive(), 2));
 
     // System info
     JsonObject sys = doc["system"].to<JsonObject>();

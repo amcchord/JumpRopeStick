@@ -104,8 +104,8 @@ bool ControllerManager::update() {
                 s_states[i].ly = applyDeadZone(ctl->axisY());
                 s_states[i].rx = applyDeadZone(ctl->axisRX());
                 s_states[i].ry = applyDeadZone(ctl->axisRY());
-                s_states[i].lt = ctl->brake();
-                s_states[i].rt = ctl->throttle();
+                s_states[i].l2 = ctl->brake();
+                s_states[i].r2 = ctl->throttle();
                 s_states[i].buttons = ctl->buttons();
                 s_states[i].dpad = ctl->dpad();
             } else if (s_rawControllers[i] == nullptr) {

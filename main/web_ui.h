@@ -132,6 +132,55 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     color: #7eb8ff;
     border-color: #7eb8ff;
   }
+  .motor-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+  }
+  .motor-label {
+    width: 55px;
+    font-size: 0.85em;
+    color: #999;
+    flex-shrink: 0;
+  }
+  .motor-bar-track {
+    flex: 1;
+    height: 14px;
+    background: #1e2130;
+    border-radius: 4px;
+    position: relative;
+    overflow: hidden;
+  }
+  .motor-bar-center {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #444;
+  }
+  .motor-bar-fill {
+    position: absolute;
+    top: 1px;
+    bottom: 1px;
+    border-radius: 3px;
+    transition: left 0.05s, width 0.05s, background 0.05s;
+  }
+  .motor-value {
+    width: 45px;
+    text-align: right;
+    font-family: 'SF Mono', monospace;
+    font-size: 0.8em;
+    color: #fff;
+    flex-shrink: 0;
+  }
+  .motor-us {
+    font-size: 0.75em;
+    color: #666;
+    text-align: right;
+    padding-right: 2px;
+  }
   #poll-status {
     font-size: 0.8em;
     color: #666;
@@ -159,9 +208,25 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
   </div>
 
   <div class="card">
-    <h2>Outputs</h2>
-    <div class="row"><span class="label">Servo L (G25)</span><span class="value" id="servo-l">1500</span></div>
-    <div class="row"><span class="label">Servo R (G26)</span><span class="value" id="servo-r">1500</span></div>
+    <h2>Drive Output</h2>
+    <div class="motor-row">
+      <span class="motor-label">Left</span>
+      <div class="motor-bar-track">
+        <div class="motor-bar-center"></div>
+        <div class="motor-bar-fill" id="motor-l-fill"></div>
+      </div>
+      <span class="motor-value" id="motor-l-val">0%</span>
+    </div>
+    <div class="motor-us" id="motor-l-us">1500 us</div>
+    <div class="motor-row">
+      <span class="motor-label">Right</span>
+      <div class="motor-bar-track">
+        <div class="motor-bar-center"></div>
+        <div class="motor-bar-fill" id="motor-r-fill"></div>
+      </div>
+      <span class="motor-value" id="motor-r-val">0%</span>
+    </div>
+    <div class="motor-us" id="motor-r-us">1500 us</div>
   </div>
 
   <div class="card">
@@ -231,8 +296,8 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     }
 
     if (d.servos) {
-      setText('servo-l', d.servos.left);
-      setText('servo-r', d.servos.right);
+      updateMotorBar('l', parseFloat(d.servos.leftDrive) || 0, d.servos.left || 1500);
+      updateMotorBar('r', parseFloat(d.servos.rightDrive) || 0, d.servos.right || 1500);
     }
 
     if (d.system) {
@@ -251,8 +316,8 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
   }
 
   function renderController(c) {
-    var ltPct = Math.round((c.lt / 1023) * 100);
-    var rtPct = Math.round((c.rt / 1023) * 100);
+    var l2Pct = Math.round((c.l2 / 1023) * 100);
+    var r2Pct = Math.round((c.r2 / 1023) * 100);
 
     var btnNames = ['A','B','X','Y','L1','R1','L3','R3'];
     var btnHtml = '';
@@ -277,10 +342,10 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
       '<div style="font-size:0.7em;color:#666;margin-top:4px">' + c.rx + ', ' + c.ry + '</div></div>' +
       '</div>' +
       '<div style="margin-top:8px">' +
-      '<div class="row"><span class="label">LT</span><span class="value">' + c.lt + '</span></div>' +
-      '<div class="trigger-bar"><div class="trigger-fill" style="width:' + ltPct + '%"></div></div>' +
-      '<div class="row"><span class="label">RT</span><span class="value">' + c.rt + '</span></div>' +
-      '<div class="trigger-bar"><div class="trigger-fill" style="width:' + rtPct + '%"></div></div>' +
+      '<div class="row"><span class="label">L2</span><span class="value">' + c.l2 + '</span></div>' +
+      '<div class="trigger-bar"><div class="trigger-fill" style="width:' + l2Pct + '%"></div></div>' +
+      '<div class="row"><span class="label">R2</span><span class="value">' + c.r2 + '</span></div>' +
+      '<div class="trigger-bar"><div class="trigger-fill" style="width:' + r2Pct + '%"></div></div>' +
       '</div>' +
       '<div class="btn-grid">' + btnHtml + '</div></div>';
   }
@@ -294,6 +359,29 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     var py = 50 + (y / 512) * 40;
     dot.style.left = px + '%';
     dot.style.top = py + '%';
+  }
+
+  function updateMotorBar(side, drive, pulseUs) {
+    var fill = document.getElementById('motor-' + side + '-fill');
+    var valEl = document.getElementById('motor-' + side + '-val');
+    var usEl = document.getElementById('motor-' + side + '-us');
+    if (!fill || !valEl || !usEl) return;
+
+    var pct = Math.round(Math.abs(drive) * 100);
+    valEl.textContent = (drive >= 0 ? '+' : '-') + pct + '%';
+    usEl.textContent = pulseUs + ' us';
+
+    // Bar grows from center (50%) outward
+    var widthPct = Math.abs(drive) * 50;
+    if (drive >= 0) {
+      fill.style.left = '50%';
+      fill.style.width = widthPct + '%';
+      fill.style.background = '#4caf50';
+    } else {
+      fill.style.left = (50 - widthPct) + '%';
+      fill.style.width = widthPct + '%';
+      fill.style.background = '#ff5722';
+    }
   }
 
   function setText(id, val) {
