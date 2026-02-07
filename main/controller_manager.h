@@ -32,8 +32,11 @@ struct ControllerState {
     int16_t l2;         // Left trigger (L2)
     int16_t r2;         // Right trigger (R2)
 
-    // Button bitmask
+    // Button bitmask (A, B, X, Y, L1, R1, L2, R2, L3, R3)
     uint16_t buttons;
+
+    // Misc button bitmask (System, Select, Start, Capture)
+    uint16_t miscButtons;
 
     // D-pad bitmask
     uint8_t dpad;

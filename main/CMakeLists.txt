@@ -6,9 +6,10 @@ set(srcs
     "web_server.cpp"
     "controller_manager.cpp"
     "drive_manager.cpp"
-    "display_manager.cpp")
+    "display_manager.cpp"
+    "motor_manager.cpp")
 
-set(requires "bluepad32" "bluepad32_arduino" "arduino" "btstack" "esp_http_server")
+set(requires "bluepad32" "bluepad32_arduino" "arduino" "btstack" "esp_http_server" "driver" "esp_coex" "nvs_flash")
 
 idf_component_register(SRCS "${srcs}"
                     INCLUDE_DIRS "."

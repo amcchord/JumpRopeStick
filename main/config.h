@@ -14,11 +14,11 @@
 // Power
 #define PIN_HOLD         4    // Must set HIGH to keep device powered on
 
-// Servo PPM outputs
-#define PIN_SERVO_LEFT   25   // Left wheel servo
-#define PIN_SERVO_RIGHT  26   // Right wheel servo
+// Servo / ESC outputs (standard RC PPM)
+#define PIN_SERVO_LEFT   25   // Left wheel ESC
+#define PIN_SERVO_RIGHT  26   // Right wheel ESC
 
-// CAN bus via Mini CAN Unit (future use)
+// CAN bus via Mini CAN Unit (TJA1051T/3)
 #define PIN_CAN_TX       32   // TWAI TX -> Mini CAN Unit (HY2.0-4P Yellow)
 #define PIN_CAN_RX       33   // TWAI RX -> Mini CAN Unit (HY2.0-4P White)
 
@@ -45,23 +45,44 @@
 #define DISPLAY_HEIGHT           240
 
 // -- Drive / Servo Settings --------------------------------------------------
-// Servo pulse widths (microseconds)
-#define SERVO_MIN_US             1000    // Full reverse
-#define SERVO_MAX_US             2000    // Full forward
-#define SERVO_CENTER_US          1500    // Stopped / center
-
 // Drive control loop
-#define DRIVE_UPDATE_MS          20      // 50Hz control loop (1000/50 = 20ms)
+#define DRIVE_UPDATE_MS          10      // 100Hz control loop for low latency
 
 // Expo curve: 0.0 = linear, 1.0 = full cubic.
 // Blends linear and cubic: out = (1-expo)*in + expo*in^3
-#define DRIVE_EXPO               0.3f
+#define DRIVE_EXPO               0.7f
 
-// ESP32 LEDC PWM for servo signals
-#define LEDC_SERVO_LEFT_CH       0       // LEDC channel for left servo
-#define LEDC_SERVO_RIGHT_CH      1       // LEDC channel for right servo
-#define LEDC_SERVO_FREQ          50      // 50Hz = standard servo frequency
-#define LEDC_SERVO_RESOLUTION    16      // 16-bit resolution (65536 steps)
+// Slow mode: hold L1 or R1 (paddle buttons) to limit max output.
+// Value is the fraction of full output (0.30 = 30%).
+#define DRIVE_SLOW_MODE_SCALE    0.30f
+
+// Standard RC servo PPM signal
+#define SERVO_MIN_US             1000    // Full reverse (or minimum throttle)
+#define SERVO_MAX_US             2000    // Full forward (or maximum throttle)
+#define SERVO_CENTER_US          1500    // Neutral / stop
+#define SERVO_FREQ_HZ            50      // Standard 50Hz servo refresh rate
+
+// LEDC channels for servo PWM (ESP32 has 16 channels, 0-15)
+#define LEDC_SERVO_LEFT_CH       0
+#define LEDC_SERVO_RIGHT_CH      1
+#define LEDC_SERVO_TIMER         LEDC_TIMER_0
+#define LEDC_SERVO_SPEED_MODE    LEDC_LOW_SPEED_MODE
+#define LEDC_SERVO_RESOLUTION    16      // 16-bit resolution for fine pulse control
+
+// FreeRTOS drive task (runs on CPU0 alongside BTstack)
+#define DRIVE_TASK_CORE          0       // Pin to CPU0
+#define DRIVE_TASK_PRIORITY      5       // Higher than default (1)
+#define DRIVE_TASK_STACK         4096    // Stack size in bytes
+
+// -- CAN Bus / Motor Settings -----------------------------------------------
+#define CAN_BAUD_RATE            1000000     // 1 Mbps
+#define CAN_MASTER_ID            0xFD        // Our CAN master address
+#define CAN_SCAN_TIMEOUT_MS      300         // Motor scan timeout in ms
+#define MOTOR_MAX_COUNT          8           // Max motors tracked
+#define MOTOR_VBUS_POLL_MS       2000        // Voltage re-read interval in ms
+#define MOTOR_STATUS_POLL_MS     100         // Status ping interval per motor (ms)
+#define MOTOR_STALE_MS           2000        // Mark motor stale after no feedback (ms)
+#define MOTOR_REMOVE_MS          10000       // Remove motor from list after no feedback (ms)
 
 // -- Debug Logging -----------------------------------------------------------
 // Log levels: 0=NONE, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG

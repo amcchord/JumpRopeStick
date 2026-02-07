@@ -17,7 +17,10 @@
 #include "web_server.h"
 #include "controller_manager.h"
 #include "drive_manager.h"
+#include "motor_manager.h"
 #include "display_manager.h"
+
+#include "esp_coexist.h"
 
 // ---------------------------------------------------------------------------
 // Global module instances
@@ -26,6 +29,7 @@ WiFiManager g_wifiManager;
 WebServerManager g_webServer;
 // g_controllerManager is defined in controller_manager.cpp
 DriveManager g_driveManager;
+MotorManager g_motorManager;
 DisplayManager g_displayManager;
 
 // Track whether the web server has been started
@@ -58,11 +62,19 @@ void setup() {
     // Initialize WiFi
     g_wifiManager.begin();
 
+    // Balance WiFi and Bluetooth in the coexistence arbiter.
+    // ESP32 shares a single 2.4GHz radio between WiFi and BT.
+    esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
+    LOG_INFO("Main", "Coex preference set to BALANCE");
+
     // Initialize Bluepad32 controller manager
     g_controllerManager.begin();
 
-    // Initialize servo drive (LEDC PWM on G25/G26)
+    // Initialize DSHOT drive (spawns drive task on CPU0)
     g_driveManager.begin();
+
+    // Initialize CAN bus motor manager (TWAI + motor scan)
+    g_motorManager.begin();
 
     LOG_INFO("Main", "Setup complete. Entering main loop.");
     LOG_INFO("Main", "Free heap: %lu bytes", (unsigned long)ESP.getFreeHeap());
@@ -78,9 +90,9 @@ static unsigned long s_totalLoopUs = 0;
 static unsigned long s_maxLoopUs = 0;
 static unsigned long s_totalM5Us = 0;
 static unsigned long s_totalCtrlUs = 0;
-static unsigned long s_totalDriveUs = 0;
 static unsigned long s_totalWifiUs = 0;
 static unsigned long s_totalDisplayUs = 0;
+static unsigned long s_totalMotorUs = 0;
 
 // ---------------------------------------------------------------------------
 // Arduino loop - runs repeatedly on CPU1
@@ -101,11 +113,13 @@ void loop() {
     t1 = micros();
     s_totalCtrlUs += (t1 - t0);
 
-    // 2. Update servo drive (50Hz control loop, rate-limited internally)
+    // (Drive runs on its own FreeRTOS task on CPU0 -- no update() call needed)
+
+    // 2. Poll CAN bus for motor feedback
     t0 = micros();
-    g_driveManager.update();
+    g_motorManager.poll();
     t1 = micros();
-    s_totalDriveUs += (t1 - t0);
+    s_totalMotorUs += (t1 - t0);
 
     // 3. Maintain WiFi connection (handles reconnect)
     t0 = micros();
@@ -143,12 +157,13 @@ void loop() {
             unsigned long hz = (count * 1000) / (now - s_lastTimingLog);
             LOG_INFO("Main", "Loop: %lu Hz, avg=%lu us, max=%lu us, n=%lu",
                      hz, avgUs, s_maxLoopUs, count);
-            LOG_INFO("Main", "  M5=%lu us, Ctrl=%lu us, Drive=%lu us, WiFi=%lu us, Disp=%lu us (avg per loop)",
+            LOG_INFO("Main", "  M5=%lu us, Ctrl=%lu us, Motor=%lu us, WiFi=%lu us, Disp=%lu us (avg)",
                      s_totalM5Us / count, s_totalCtrlUs / count,
-                     s_totalDriveUs / count, s_totalWifiUs / count,
-                     s_totalDisplayUs / count);
-            LOG_INFO("Main", "  Controllers=%d, Heap=%lu",
+                     s_totalMotorUs / count,
+                     s_totalWifiUs / count, s_totalDisplayUs / count);
+            LOG_INFO("Main", "  Controllers=%d, Motors=%d, Heap=%lu",
                      g_controllerManager.getConnectedCount(),
+                     g_motorManager.getMotorCount(),
                      (unsigned long)ESP.getFreeHeap());
         }
         // Reset counters
@@ -157,9 +172,9 @@ void loop() {
         s_maxLoopUs = 0;
         s_totalM5Us = 0;
         s_totalCtrlUs = 0;
-        s_totalDriveUs = 0;
         s_totalWifiUs = 0;
         s_totalDisplayUs = 0;
+        s_totalMotorUs = 0;
         s_lastTimingLog = now;
     }
 

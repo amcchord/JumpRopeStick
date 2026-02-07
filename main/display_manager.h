@@ -31,6 +31,7 @@ private:
     // Drawing helpers
     void drawStatusBar(int y);
     void drawControllerInfo(int y);
+    void drawMotorInfo(int y);
     void drawOutputInfo(int y);
     void drawSystemInfo(int y);
 };

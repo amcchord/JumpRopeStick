@@ -90,11 +90,17 @@ void ControllerManager::begin() {
     LOG_INFO(TAG, "Scanning for controllers...");
 }
 
+// BT update rate tracking
+static volatile unsigned long s_btUpdateCount = 0;
+static unsigned long s_btLastLogMs = 0;
+
 bool ControllerManager::update() {
     // Poll Bluepad32 for new data
     bool dataUpdated = BP32.update();
 
     if (dataUpdated) {
+        s_btUpdateCount++;
+
         for (int i = 0; i < BP32_MAX_GAMEPADS; i++) {
             ControllerPtr ctl = s_rawControllers[i];
 
@@ -107,9 +113,34 @@ bool ControllerManager::update() {
                 s_states[i].l2 = ctl->brake();
                 s_states[i].r2 = ctl->throttle();
                 s_states[i].buttons = ctl->buttons();
+                s_states[i].miscButtons = ctl->miscButtons();
                 s_states[i].dpad = ctl->dpad();
             } else if (s_rawControllers[i] == nullptr) {
                 s_states[i].connected = false;
+            }
+        }
+    }
+
+    // Log BT update rate and button state every 2 seconds
+    unsigned long now = millis();
+    if ((now - s_btLastLogMs) >= 2000) {
+        unsigned long count = s_btUpdateCount;
+        unsigned long elapsed = now - s_btLastLogMs;
+        if (elapsed > 0) {
+            unsigned long hz = (count * 1000) / elapsed;
+            LOG_INFO(TAG, "BT input rate: %lu Hz (%lu updates in %lu ms)",
+                     hz, count, elapsed);
+        }
+        s_btUpdateCount = 0;
+        s_btLastLogMs = now;
+
+        // Dump all button/axis state for the first connected controller
+        for (int i = 0; i < CONTROLLER_MAX_COUNT; i++) {
+            if (s_states[i].connected) {
+                LOG_INFO(TAG, "Slot%d btns=0x%04X misc=0x%04X dpad=0x%02X L2=%d R2=%d",
+                         i, s_states[i].buttons, s_states[i].miscButtons,
+                         s_states[i].dpad, s_states[i].l2, s_states[i].r2);
+                break;
             }
         }
     }

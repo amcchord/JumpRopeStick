@@ -1,8 +1,11 @@
 // =============================================================================
 // Drive Manager Module - Implementation
 // =============================================================================
+// Standard RC servo PPM via ESP32 LEDC peripheral. Runs as a FreeRTOS task
+// on CPU0 for deterministic 50Hz timing, isolated from display/WiFi on CPU1.
+//
 // Arcade-style differential drive with expo curves.
-// Uses ESP32 LEDC for servo PPM output at 50Hz.
+// Bidirectional: 1500us = stop, 1000us = full reverse, 2000us = full forward.
 // =============================================================================
 
 #include "drive_manager.h"
@@ -10,8 +13,10 @@
 #include "debug_log.h"
 #include "controller_manager.h"
 
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <driver/ledc.h>
-#include <math.h>
+#include <controller/uni_gamepad.h>  // For BUTTON_SHOULDER_L/R constants
 
 static const char* TAG = "Drive";
 
@@ -21,165 +26,52 @@ extern ControllerManager g_controllerManager;
 // Axis range from Bluepad32
 static const float AXIS_MAX = 512.0f;
 
+// LEDC resolution and duty cycle calculations
+// At 16-bit resolution with 50Hz, one full period = 20000us
+// duty = (pulseUs / 20000) * 65535
+static const uint32_t LEDC_FULL_DUTY = (1 << LEDC_SERVO_RESOLUTION) - 1;  // 65535
+static const uint32_t SERVO_PERIOD_US = 1000000 / SERVO_FREQ_HZ;          // 20000us
+
 // ---------------------------------------------------------------------------
 // Public methods
 // ---------------------------------------------------------------------------
 
 void DriveManager::begin() {
-    LOG_INFO(TAG, "Initializing servo drive...");
+    LOG_INFO(TAG, "Initializing servo PPM drive...");
 
-    // Configure LEDC timer (shared by both channels)
-    ledc_timer_config_t timerCfg = {};
-    timerCfg.speed_mode      = LEDC_LOW_SPEED_MODE;
-    timerCfg.timer_num       = LEDC_TIMER_0;
-    timerCfg.duty_resolution = (ledc_timer_bit_t)LEDC_SERVO_RESOLUTION;
-    timerCfg.freq_hz         = LEDC_SERVO_FREQ;
-    timerCfg.clk_cfg         = LEDC_AUTO_CLK;
-
-    esp_err_t err = ledc_timer_config(&timerCfg);
-    if (err != ESP_OK) {
-        LOG_ERROR(TAG, "LEDC timer config failed: %s", esp_err_to_name(err));
+    if (!initLedc()) {
+        LOG_ERROR(TAG, "LEDC initialization failed, drive disabled");
         return;
     }
 
-    // Configure left servo channel
-    ledc_channel_config_t leftCh = {};
-    leftCh.speed_mode = LEDC_LOW_SPEED_MODE;
-    leftCh.channel    = (ledc_channel_t)LEDC_SERVO_LEFT_CH;
-    leftCh.timer_sel  = LEDC_TIMER_0;
-    leftCh.intr_type  = LEDC_INTR_DISABLE;
-    leftCh.gpio_num   = PIN_SERVO_LEFT;
-    leftCh.duty       = 0;
-    leftCh.hpoint     = 0;
-
-    err = ledc_channel_config(&leftCh);
-    if (err != ESP_OK) {
-        LOG_ERROR(TAG, "LEDC left channel config failed: %s", esp_err_to_name(err));
-        return;
-    }
-
-    // Configure right servo channel
-    ledc_channel_config_t rightCh = {};
-    rightCh.speed_mode = LEDC_LOW_SPEED_MODE;
-    rightCh.channel    = (ledc_channel_t)LEDC_SERVO_RIGHT_CH;
-    rightCh.timer_sel  = LEDC_TIMER_0;
-    rightCh.intr_type  = LEDC_INTR_DISABLE;
-    rightCh.gpio_num   = PIN_SERVO_RIGHT;
-    rightCh.duty       = 0;
-    rightCh.hpoint     = 0;
-
-    err = ledc_channel_config(&rightCh);
-    if (err != ESP_OK) {
-        LOG_ERROR(TAG, "LEDC right channel config failed: %s", esp_err_to_name(err));
-        return;
-    }
-
-    // Set both servos to center (stopped)
+    // Start with servos at center (stopped)
     writeServo(LEDC_SERVO_LEFT_CH, SERVO_CENTER_US);
     writeServo(LEDC_SERVO_RIGHT_CH, SERVO_CENTER_US);
 
-    _leftPulseUs = SERVO_CENTER_US;
-    _rightPulseUs = SERVO_CENTER_US;
     _initialized = true;
 
-    LOG_INFO(TAG, "Servo drive ready (L=G%d, R=G%d, %dHz control loop)",
-             PIN_SERVO_LEFT, PIN_SERVO_RIGHT, 1000 / DRIVE_UPDATE_MS);
-}
+    // Spawn the drive control task on CPU0
+    BaseType_t result = xTaskCreatePinnedToCore(
+        driveTaskFunc,          // Task function
+        "drive",                // Name
+        DRIVE_TASK_STACK,       // Stack size
+        this,                   // Parameter (DriveManager instance)
+        DRIVE_TASK_PRIORITY,    // Priority
+        NULL,                   // Task handle (not needed)
+        DRIVE_TASK_CORE         // Core ID
+    );
 
-void DriveManager::update() {
-    if (!_initialized) {
+    if (result != pdPASS) {
+        LOG_ERROR(TAG, "Failed to create drive task");
+        _initialized = false;
         return;
     }
 
-    // Rate-limit to 50Hz (20ms)
-    unsigned long now = millis();
-    if (now - _lastUpdateMs < DRIVE_UPDATE_MS) {
-        return;
-    }
-    _lastUpdateMs = now;
-
-    // Find the first connected controller
-    const ControllerState* activeCtrl = nullptr;
-    for (int i = 0; i < CONTROLLER_MAX_COUNT; i++) {
-        const ControllerState& state = g_controllerManager.getState(i);
-        if (state.connected) {
-            activeCtrl = &state;
-            break;
-        }
-    }
-
-    // Failsafe: no controller -> stop
-    if (activeCtrl == nullptr) {
-        _leftDrive = 0.0f;
-        _rightDrive = 0.0f;
-        _leftPulseUs = SERVO_CENTER_US;
-        _rightPulseUs = SERVO_CENTER_US;
-        writeServo(LEDC_SERVO_LEFT_CH, SERVO_CENTER_US);
-        writeServo(LEDC_SERVO_RIGHT_CH, SERVO_CENTER_US);
-        return;
-    }
-
-    // -----------------------------------------------------------------------
-    // Stick selection: use whichever stick has larger total deflection
-    // -----------------------------------------------------------------------
-    float lMag = (float)(activeCtrl->lx) * (float)(activeCtrl->lx)
-               + (float)(activeCtrl->ly) * (float)(activeCtrl->ly);
-    float rMag = (float)(activeCtrl->rx) * (float)(activeCtrl->rx)
-               + (float)(activeCtrl->ry) * (float)(activeCtrl->ry);
-
-    float rawX, rawY;
-    if (lMag >= rMag) {
-        rawX = (float)activeCtrl->lx;
-        rawY = (float)activeCtrl->ly;
-    } else {
-        rawX = (float)activeCtrl->rx;
-        rawY = (float)activeCtrl->ry;
-    }
-
-    // -----------------------------------------------------------------------
-    // Normalize to [-1.0, 1.0]
-    // -----------------------------------------------------------------------
-    float normX = rawX / AXIS_MAX;  // Turn: positive = right
-    float normY = rawY / AXIS_MAX;  // Raw Y: negative = stick up
-
-    // Clamp in case axis slightly exceeds range
-    if (normX > 1.0f) { normX = 1.0f; }
-    if (normX < -1.0f) { normX = -1.0f; }
-    if (normY > 1.0f) { normY = 1.0f; }
-    if (normY < -1.0f) { normY = -1.0f; }
-
-    // Throttle: negate Y so stick-up = positive (forward)
-    float throttle = -normY;
-    float turn = normX;
-
-    // -----------------------------------------------------------------------
-    // Apply expo curve to both axes independently
-    // -----------------------------------------------------------------------
-    throttle = applyExpo(throttle, DRIVE_EXPO);
-    turn     = applyExpo(turn, DRIVE_EXPO);
-
-    // -----------------------------------------------------------------------
-    // Arcade mix: differential drive
-    // -----------------------------------------------------------------------
-    float left  = throttle + turn;
-    float right = throttle - turn;
-
-    // Clamp to [-1.0, 1.0]
-    if (left > 1.0f) { left = 1.0f; }
-    if (left < -1.0f) { left = -1.0f; }
-    if (right > 1.0f) { right = 1.0f; }
-    if (right < -1.0f) { right = -1.0f; }
-
-    // -----------------------------------------------------------------------
-    // Output to servos
-    // -----------------------------------------------------------------------
-    _leftDrive = left;
-    _rightDrive = right;
-    _leftPulseUs = driveToMicroseconds(left);
-    _rightPulseUs = driveToMicroseconds(right);
-
-    writeServo(LEDC_SERVO_LEFT_CH, _leftPulseUs);
-    writeServo(LEDC_SERVO_RIGHT_CH, _rightPulseUs);
+    LOG_INFO(TAG, "Drive task started on CPU%d (PPM %dHz, L=G%d ch%d, R=G%d ch%d, mix@%dHz)",
+             DRIVE_TASK_CORE, SERVO_FREQ_HZ,
+             PIN_SERVO_LEFT, LEDC_SERVO_LEFT_CH,
+             PIN_SERVO_RIGHT, LEDC_SERVO_RIGHT_CH,
+             1000 / DRIVE_UPDATE_MS);
 }
 
 uint16_t DriveManager::getLeftPulse() const {
@@ -199,32 +91,192 @@ float DriveManager::getRightDrive() const {
 }
 
 // ---------------------------------------------------------------------------
-// Private helpers
+// LEDC initialization
 // ---------------------------------------------------------------------------
 
-float DriveManager::applyExpo(float input, float expo) const {
+bool DriveManager::initLedc() {
+    // Configure LEDC timer for 50Hz servo signal
+    ledc_timer_config_t timerCfg = {};
+    timerCfg.speed_mode = (ledc_mode_t)LEDC_SERVO_SPEED_MODE;
+    timerCfg.timer_num = (ledc_timer_t)LEDC_SERVO_TIMER;
+    timerCfg.duty_resolution = (ledc_timer_bit_t)LEDC_SERVO_RESOLUTION;
+    timerCfg.freq_hz = SERVO_FREQ_HZ;
+    timerCfg.clk_cfg = LEDC_AUTO_CLK;
+
+    esp_err_t err = ledc_timer_config(&timerCfg);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "LEDC timer config failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    // Configure left servo channel
+    ledc_channel_config_t chCfg = {};
+    chCfg.speed_mode = (ledc_mode_t)LEDC_SERVO_SPEED_MODE;
+    chCfg.channel = (ledc_channel_t)LEDC_SERVO_LEFT_CH;
+    chCfg.timer_sel = (ledc_timer_t)LEDC_SERVO_TIMER;
+    chCfg.intr_type = LEDC_INTR_DISABLE;
+    chCfg.gpio_num = PIN_SERVO_LEFT;
+    chCfg.duty = 0;
+    chCfg.hpoint = 0;
+
+    err = ledc_channel_config(&chCfg);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "LEDC left channel config failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    // Configure right servo channel
+    chCfg.channel = (ledc_channel_t)LEDC_SERVO_RIGHT_CH;
+    chCfg.gpio_num = PIN_SERVO_RIGHT;
+
+    err = ledc_channel_config(&chCfg);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "LEDC right channel config failed: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    LOG_INFO(TAG, "LEDC servo ready: 2 channels, %dHz, %d-bit resolution",
+             SERVO_FREQ_HZ, LEDC_SERVO_RESOLUTION);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Servo output
+// ---------------------------------------------------------------------------
+
+void DriveManager::writeServo(uint8_t channel, uint16_t pulseUs) {
+    // Convert pulse width in microseconds to LEDC duty cycle
+    // duty = (pulseUs / periodUs) * maxDuty
+    uint32_t duty = (uint32_t)pulseUs * LEDC_FULL_DUTY / SERVO_PERIOD_US;
+    ledc_set_duty((ledc_mode_t)LEDC_SERVO_SPEED_MODE, (ledc_channel_t)channel, duty);
+    ledc_update_duty((ledc_mode_t)LEDC_SERVO_SPEED_MODE, (ledc_channel_t)channel);
+}
+
+uint16_t DriveManager::driveToMicroseconds(float drive) {
+    // Map -1.0..1.0 to SERVO_MIN_US..SERVO_MAX_US (center at 0.0 = SERVO_CENTER_US)
+    if (drive > 1.0f) { drive = 1.0f; }
+    if (drive < -1.0f) { drive = -1.0f; }
+
+    // Linear map: center + drive * half_range
+    float halfRange = (float)(SERVO_MAX_US - SERVO_MIN_US) / 2.0f;
+    float result = (float)SERVO_CENTER_US + drive * halfRange;
+    return (uint16_t)(result + 0.5f);
+}
+
+// ---------------------------------------------------------------------------
+// Expo helper
+// ---------------------------------------------------------------------------
+
+float DriveManager::applyExpo(float input, float expo) {
     // Blend between linear and cubic: out = (1-expo)*in + expo*in^3
     // Preserves sign, gives finer control near center while keeping full range.
     float cubic = input * input * input;
     return (1.0f - expo) * input + expo * cubic;
 }
 
-uint16_t DriveManager::driveToMicroseconds(float drive) const {
-    // Map -1.0..1.0 to SERVO_MIN_US..SERVO_MAX_US
-    // 0.0 -> SERVO_CENTER_US (1500)
-    float us = SERVO_CENTER_US + drive * (float)(SERVO_MAX_US - SERVO_CENTER_US);
-    if (us < (float)SERVO_MIN_US) { us = (float)SERVO_MIN_US; }
-    if (us > (float)SERVO_MAX_US) { us = (float)SERVO_MAX_US; }
-    return (uint16_t)(us + 0.5f);
-}
+// ---------------------------------------------------------------------------
+// FreeRTOS drive task -- runs on CPU0
+// ---------------------------------------------------------------------------
 
-void DriveManager::writeServo(uint8_t channel, uint16_t pulseUs) const {
-    // Convert pulse width in microseconds to LEDC duty value.
-    // At 50Hz, period = 20000us.  At 16-bit resolution, max duty = 65536.
-    // duty = (pulseUs / 20000) * 65536
-    uint32_t maxDuty = (1U << LEDC_SERVO_RESOLUTION);
-    uint32_t duty = (uint32_t)((float)pulseUs / 20000.0f * (float)maxDuty);
+void DriveManager::driveTaskFunc(void* param) {
+    DriveManager* self = static_cast<DriveManager*>(param);
 
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)channel, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)channel);
+    LOG_INFO(TAG, "Drive task running on core %d", xPortGetCoreID());
+
+    TickType_t lastWake = xTaskGetTickCount();
+    unsigned long lastLogMs = millis();
+
+    for (;;) {
+        // Sleep until next 20ms tick (50Hz)
+        vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(DRIVE_UPDATE_MS));
+
+        unsigned long now = millis();
+
+        // Find the first connected controller
+        const ControllerState* activeCtrl = nullptr;
+        for (int i = 0; i < CONTROLLER_MAX_COUNT; i++) {
+            const ControllerState& state = g_controllerManager.getState(i);
+            if (state.connected) {
+                activeCtrl = &state;
+                break;
+            }
+        }
+
+        uint16_t leftUs = SERVO_CENTER_US;
+        uint16_t rightUs = SERVO_CENTER_US;
+        float leftDrive = 0.0f;
+        float rightDrive = 0.0f;
+
+        if (activeCtrl != nullptr) {
+            // Stick selection: use whichever stick has larger total deflection
+            float lMag = (float)(activeCtrl->lx) * (float)(activeCtrl->lx)
+                       + (float)(activeCtrl->ly) * (float)(activeCtrl->ly);
+            float rMag = (float)(activeCtrl->rx) * (float)(activeCtrl->rx)
+                       + (float)(activeCtrl->ry) * (float)(activeCtrl->ry);
+
+            float rawX, rawY;
+            if (lMag >= rMag) {
+                rawX = (float)activeCtrl->lx;
+                rawY = (float)activeCtrl->ly;
+            } else {
+                rawX = (float)activeCtrl->rx;
+                rawY = (float)activeCtrl->ry;
+            }
+
+            // Normalize to [-1.0, 1.0]
+            float normX = rawX / AXIS_MAX;
+            float normY = rawY / AXIS_MAX;
+            if (normX > 1.0f) { normX = 1.0f; }
+            if (normX < -1.0f) { normX = -1.0f; }
+            if (normY > 1.0f) { normY = 1.0f; }
+            if (normY < -1.0f) { normY = -1.0f; }
+
+            // Throttle: negate Y so stick-up = positive (forward)
+            float throttle = -normY;
+            float turn = normX;
+
+            // Apply expo curve to both axes independently
+            throttle = applyExpo(throttle, DRIVE_EXPO);
+            turn     = applyExpo(turn, DRIVE_EXPO);
+
+            // Arcade mix: differential drive
+            // Turn is subtracted from left, added to right so that
+            // stick-right makes the robot turn right.
+            leftDrive  = throttle - turn;
+            rightDrive = throttle + turn;
+            if (leftDrive > 1.0f) { leftDrive = 1.0f; }
+            if (leftDrive < -1.0f) { leftDrive = -1.0f; }
+            if (rightDrive > 1.0f) { rightDrive = 1.0f; }
+            if (rightDrive < -1.0f) { rightDrive = -1.0f; }
+
+            // Slow mode: hold L1 or R1 (paddle buttons) to limit output
+            bool slowMode = (activeCtrl->buttons & BUTTON_SHOULDER_L) != 0
+                         || (activeCtrl->buttons & BUTTON_SHOULDER_R) != 0;
+            if (slowMode) {
+                leftDrive  *= DRIVE_SLOW_MODE_SCALE;
+                rightDrive *= DRIVE_SLOW_MODE_SCALE;
+            }
+
+            // Convert to servo pulse widths
+            leftUs  = driveToMicroseconds(leftDrive);
+            rightUs = driveToMicroseconds(rightDrive);
+        }
+
+        // Write to servo hardware
+        writeServo(LEDC_SERVO_LEFT_CH, leftUs);
+        writeServo(LEDC_SERVO_RIGHT_CH, rightUs);
+
+        // Update shared state for display/web (volatile writes)
+        self->_leftDrive = leftDrive;
+        self->_rightDrive = rightDrive;
+        self->_leftPulseUs = leftUs;
+        self->_rightPulseUs = rightUs;
+
+        // Periodic log (every 500ms)
+        if ((now - lastLogMs) >= 500) {
+            lastLogMs = now;
+            LOG_INFO(TAG, "PPM L=%uus R=%uus  drive L=%.2f R=%.2f",
+                     leftUs, rightUs, leftDrive, rightDrive);
+        }
+    }
 }

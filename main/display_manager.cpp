@@ -8,6 +8,7 @@
 #include "wifi_manager.h"
 #include "controller_manager.h"
 #include "drive_manager.h"
+#include "motor_manager.h"
 
 #include <M5Unified.h>
 
@@ -30,6 +31,7 @@ static M5Canvas sprite(&M5.Display);
 extern WiFiManager g_wifiManager;
 extern ControllerManager g_controllerManager;
 extern DriveManager g_driveManager;
+extern MotorManager g_motorManager;
 
 void DisplayManager::begin() {
     LOG_INFO(TAG, "Initializing display...");
@@ -63,13 +65,22 @@ void DisplayManager::update() {
     sprite.fillSprite(COLOR_BG);
 
     // Draw sections top to bottom
+    // Layout budget for 240px display:
+    //   Status bar:  28px
+    //   Controller: 107px (added miscButtons row)
+    //   Motors:      40px
+    //   Outputs:     36px
+    //   System:      29px
+    //   Total:      240px
     int y = 0;
     drawStatusBar(y);
     y += 28;
     drawControllerInfo(y);
-    y += 120;
+    y += 107;
+    drawMotorInfo(y);
+    y += 40;
     drawOutputInfo(y);
-    y += 48;
+    y += 36;
     drawSystemInfo(y);
 
     // Push sprite to display (flicker-free)
@@ -173,27 +184,43 @@ void DisplayManager::drawControllerInfo(int y) {
         sprite.print(trigBuf);
         y += 11;
 
-        // Buttons - draw small indicators
+        // Buttons row 1: A B X Y L1 R1
         sprite.setTextColor(COLOR_TEXT_DIM);
         sprite.setCursor(4, y);
         sprite.print("B:");
 
-        const char* btnLabels[] = {"A","B","X","Y","L1","R1","L3","R3"};
+        const char* btnLabels[] = {"A","B","X","Y","L1","R1","L2","R2","L3","R3"};
         int bx = 20;
-        for (int b = 0; b < 8; b++) {
+        for (int b = 0; b < 6; b++) {
             bool pressed = (state.buttons & (1 << b)) != 0;
-            if (pressed) {
-                sprite.setTextColor(COLOR_ACCENT);
-            } else {
-                sprite.setTextColor(0x3186);  // Very dim
-            }
+            sprite.setTextColor(pressed ? COLOR_ACCENT : 0x3186);
             sprite.setCursor(bx, y);
             sprite.print(btnLabels[b]);
             bx += (b < 4) ? 14 : 16;
         }
         y += 11;
 
-        // D-pad
+        // Buttons row 2: L2 R2 L3 R3 + Misc (Sel Sta Sys Cap)
+        bx = 20;
+        for (int b = 6; b < 10; b++) {
+            bool pressed = (state.buttons & (1 << b)) != 0;
+            sprite.setTextColor(pressed ? COLOR_ACCENT : 0x3186);
+            sprite.setCursor(bx, y);
+            sprite.print(btnLabels[b]);
+            bx += 16;
+        }
+        // Misc buttons: 0=System, 1=Select, 2=Start, 3=Capture
+        const char* miscLabels[] = {"Sys","Sel","Sta","Cap"};
+        for (int m = 0; m < 4; m++) {
+            bool pressed = (state.miscButtons & (1 << m)) != 0;
+            sprite.setTextColor(pressed ? COLOR_OK : 0x3186);
+            sprite.setCursor(bx, y);
+            sprite.print(miscLabels[m]);
+            bx += 20;
+        }
+        y += 11;
+
+        // D-pad + raw hex for debugging unmapped buttons
         sprite.setTextColor(COLOR_TEXT_DIM);
         sprite.setCursor(4, y);
         sprite.print("D:");
@@ -207,9 +234,110 @@ void DisplayManager::drawControllerInfo(int y) {
             sprite.print(dNames[d]);
             dx += 14;
         }
+        // Raw hex for debugging
+        sprite.setTextColor(COLOR_TEXT_DIM);
+        sprite.setCursor(80, y);
+        char hexBuf[20];
+        snprintf(hexBuf, sizeof(hexBuf), "%03X/%02X", state.buttons, state.miscButtons);
+        sprite.print(hexBuf);
 
         // Only show first connected controller on the small display
         break;
+    }
+}
+
+void DisplayManager::drawMotorInfo(int y) {
+    sprite.setTextSize(1);
+    sprite.setTextColor(COLOR_ACCENT);
+    sprite.setCursor(4, y + 2);
+
+    int motorCount = g_motorManager.getMotorCount();
+    char headerBuf[24];
+    snprintf(headerBuf, sizeof(headerBuf), "MOTORS (%d)", motorCount);
+    sprite.print(headerBuf);
+
+    // Show CAN status indicator
+    if (!g_motorManager.isRunning()) {
+        sprite.setTextColor(COLOR_ERROR);
+        sprite.setCursor(90, y + 2);
+        sprite.print("NO CAN");
+    }
+
+    y += 14;
+
+    if (motorCount == 0) {
+        sprite.setTextColor(COLOR_TEXT_DIM);
+        sprite.setCursor(4, y);
+        sprite.print("No motors found");
+        return;
+    }
+
+    // Show up to 2 motors (fits in available space)
+    int showCount = motorCount;
+    if (showCount > 2) {
+        showCount = 2;
+    }
+
+    for (int i = 0; i < showCount; i++) {
+        uint8_t motorId = g_motorManager.getMotorId(i);
+        const RobstrideMotorStatus& status = g_motorManager.getMotorStatus(i);
+
+        // Color based on state
+        uint16_t stateColor = COLOR_TEXT_DIM;  // Gray = no data / reset
+        if (status.stale) {
+            stateColor = COLOR_WARN;   // Orange = stale / disconnected
+        } else if (status.hasFault) {
+            stateColor = COLOR_ERROR;  // Red = fault
+        } else if (status.enabled) {
+            stateColor = COLOR_OK;     // Green = running
+        } else if (status.mode == 1) {
+            stateColor = COLOR_WARN;   // Orange = calibrating
+        }
+
+        // Motor ID with role label
+        sprite.setTextColor(stateColor);
+        sprite.setCursor(4, y);
+        const char* role = g_motorManager.getRoleLabel(motorId);
+        char idBuf[12];
+        if (role[0] != '\0') {
+            snprintf(idBuf, sizeof(idBuf), "%s%d:", role, motorId);
+        } else {
+            snprintf(idBuf, sizeof(idBuf), "M%d:", motorId);
+        }
+        sprite.print(idBuf);
+
+        // Voltage
+        sprite.setTextColor(COLOR_TEXT);
+        char vBuf[10];
+        if (status.voltage > 0.1f) {
+            snprintf(vBuf, sizeof(vBuf), "%.1fV", status.voltage);
+        } else {
+            snprintf(vBuf, sizeof(vBuf), "--V");
+        }
+        sprite.setCursor(32, y);
+        sprite.print(vBuf);
+
+        // Mode (RST/CAL/RUN/---)
+        const char* modeStr = "RST";
+        if (status.stale) {
+            modeStr = "---";
+        } else if (status.mode == 1) {
+            modeStr = "CAL";
+        } else if (status.mode == 2) {
+            modeStr = "RUN";
+        }
+        sprite.setTextColor(stateColor);
+        sprite.setCursor(72, y);
+        sprite.print(modeStr);
+
+        // Position in radians
+        sprite.setTextColor(COLOR_TEXT);
+        sprite.setCursor(96, y);
+        char posBuf[12];
+        snprintf(posBuf, sizeof(posBuf), "%+.2f", status.position);
+        sprite.print(posBuf);
+
+        y += 11;
     }
 }
 
@@ -220,7 +348,7 @@ void DisplayManager::drawOutputInfo(int y) {
     sprite.print("OUTPUTS");
     y += 14;
 
-    // Servo pulse values from drive manager
+    // Servo pulse widths from drive manager
     sprite.setTextColor(COLOR_TEXT_DIM);
     sprite.setCursor(4, y);
     sprite.print("SrvL:");

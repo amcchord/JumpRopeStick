@@ -181,6 +181,67 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     text-align: right;
     padding-right: 2px;
   }
+  .can-motor-item {
+    background: #12141c;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 6px;
+  }
+  .can-motor-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .can-motor-id {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.95em;
+    font-weight: bold;
+    color: #7eb8ff;
+  }
+  .can-motor-badge {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.7em;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+  .can-motor-badge.run { background: #1b4332; color: #44ff44; }
+  .can-motor-badge.cal { background: #4a3400; color: #ffaa00; }
+  .can-motor-badge.rst { background: #333; color: #888; }
+  .can-motor-badge.fault { background: #4a0000; color: #ff4444; }
+  .can-motor-badge.stale { background: #3a3a00; color: #ccaa00; }
+  .can-motor-item.stale { opacity: 0.5; border: 1px solid #665500; }
+  .can-motor-role {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.7em;
+    font-weight: bold;
+    font-family: 'SF Mono', monospace;
+    background: #2a4a7a;
+    color: #7eb8ff;
+  }
+  .settings-link {
+    float: right;
+    font-size: 0.7em;
+    color: #666;
+    text-decoration: none;
+  }
+  .settings-link:hover { color: #7eb8ff; }
+  .can-motor-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px;
+  }
+  .can-motor-stat .label {
+    font-size: 0.7em;
+    color: #666;
+  }
+  .can-motor-stat .value {
+    font-family: 'SF Mono', monospace;
+    font-size: 0.9em;
+    color: #fff;
+  }
   #poll-status {
     font-size: 0.8em;
     color: #666;
@@ -205,6 +266,11 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
   <div class="card" id="ctrl-card">
     <h2>Controller <span id="ctrl-count">(0)</span></h2>
     <div id="ctrl-content" class="no-controller">No controller connected. Put 8BitDo in pairing mode.</div>
+  </div>
+
+  <div class="card" id="can-card">
+    <h2>CAN Motors <span id="can-count">(0)</span> <a href="/settings" class="settings-link">Settings</a></h2>
+    <div id="can-content" style="color:#555;text-align:center;padding:10px;font-style:italic;">No motors detected</div>
   </div>
 
   <div class="card">
@@ -295,9 +361,27 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
-    if (d.servos) {
-      updateMotorBar('l', parseFloat(d.servos.leftDrive) || 0, d.servos.left || 1500);
-      updateMotorBar('r', parseFloat(d.servos.rightDrive) || 0, d.servos.right || 1500);
+    if (d.motors !== undefined) {
+      setText('can-count', '(' + d.motors.length + ')');
+      var canContent = document.getElementById('can-content');
+      if (d.motors.length === 0) {
+        var noMotorMsg = 'No motors detected';
+        if (d.canRunning === false) {
+          noMotorMsg = 'CAN bus not running';
+        }
+        canContent.innerHTML = '<div style="color:#555;text-align:center;padding:10px;font-style:italic;">' + noMotorMsg + '</div>';
+      } else {
+        var mHtml = '';
+        for (var mi = 0; mi < d.motors.length; mi++) {
+          mHtml += renderCanMotor(d.motors[mi]);
+        }
+        canContent.innerHTML = mHtml;
+      }
+    }
+
+    if (d.drive) {
+      updateMotorBar('l', parseFloat(d.drive.leftDrive) || 0, d.drive.left || 0);
+      updateMotorBar('r', parseFloat(d.drive.rightDrive) || 0, d.drive.right || 0);
     }
 
     if (d.system) {
@@ -348,6 +432,57 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
       '<div class="trigger-bar"><div class="trigger-fill" style="width:' + r2Pct + '%"></div></div>' +
       '</div>' +
       '<div class="btn-grid">' + btnHtml + '</div></div>';
+  }
+
+  function renderCanMotor(m) {
+    var modeNames = ['Reset', 'Calibration', 'Running'];
+    var modeClasses = ['rst', 'cal', 'run'];
+    var modeIdx = m.mode || 0;
+    if (modeIdx > 2) modeIdx = 0;
+    var badgeClass = modeClasses[modeIdx];
+    var badgeText = modeNames[modeIdx];
+    if (m.hasFault) {
+      badgeClass = 'fault';
+      badgeText = 'FAULT 0x' + (m.errorCode || 0).toString(16).toUpperCase();
+    }
+    if (m.stale) {
+      badgeClass = 'stale';
+      badgeText = 'STALE';
+    }
+
+    var itemClass = 'can-motor-item';
+    if (m.stale) {
+      itemClass += ' stale';
+    }
+
+    var runModeNames = ['MIT', 'Pos-PP', 'Speed', 'Current', 'ZeroCal', 'Pos-CSP'];
+    var runModeStr = runModeNames[m.runMode] || ('Mode ' + m.runMode);
+
+    var voltage = parseFloat(m.voltage) || 0;
+    var voltageStr = voltage > 0.1 ? voltage.toFixed(1) + 'V' : '--';
+
+    var roleHtml = '';
+    if (m.role === 'L') {
+      roleHtml = '<span class="can-motor-role">LEFT</span>';
+    } else if (m.role === 'R') {
+      roleHtml = '<span class="can-motor-role">RIGHT</span>';
+    }
+
+    return '<div class="' + itemClass + '">' +
+      '<div class="can-motor-header">' +
+        '<span class="can-motor-id">Motor ' + m.id + '</span>' +
+        roleHtml +
+        '<span class="can-motor-badge ' + badgeClass + '">' + badgeText + '</span>' +
+      '</div>' +
+      '<div class="can-motor-stats">' +
+        '<div class="can-motor-stat"><div class="label">Voltage</div><div class="value">' + voltageStr + '</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Position</div><div class="value">' + parseFloat(m.position).toFixed(2) + ' rad</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Velocity</div><div class="value">' + parseFloat(m.velocity).toFixed(1) + '</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Torque</div><div class="value">' + parseFloat(m.torque).toFixed(2) + ' Nm</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Temp</div><div class="value">' + parseFloat(m.temperature).toFixed(0) + '&deg;C</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Mode</div><div class="value">' + runModeStr + '</div></div>' +
+      '</div>' +
+    '</div>';
   }
 
   function updateStickDot(canvasId, x, y) {
