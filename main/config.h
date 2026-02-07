@@ -84,6 +84,14 @@
 #define MOTOR_STALE_MS           2000        // Mark motor stale after no feedback (ms)
 #define MOTOR_REMOVE_MS          10000       // Remove motor from list after no feedback (ms)
 
+// -- Motor Trim Settings -----------------------------------------------------
+#define TRIM_STEP_RAD            0.01f   // Position nudge per d-pad press (~0.6 degrees)
+
+// -- Motor Stick Control Settings --------------------------------------------
+#define STICK_UPDATE_MS          20      // Position command rate (50 Hz)
+#define STICK_MAX_JOG_RAD_S      3.0f   // Max jog speed in rad/s at full stick deflection (~170 deg/s)
+#define R2_TRIGGER_DEADZONE      20      // Analog trigger deadzone (out of 1023)
+
 // -- Debug Logging -----------------------------------------------------------
 // Log levels: 0=NONE, 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG
 #define LOG_LEVEL                3       // INFO level by default

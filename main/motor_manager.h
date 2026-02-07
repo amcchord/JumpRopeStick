@@ -63,6 +63,28 @@ public:
     const RobstrideMotorStatus& getLeftMotorStatus() const;
     const RobstrideMotorStatus& getRightMotorStatus() const;
 
+    // ---- Motor Commands ----
+
+    // Enable a motor (sends MOTOR_ENABLE, comm type 0x03).
+    // Motor must be enabled before it will respond to control commands.
+    bool enableMotor(uint8_t motorId);
+
+    // Stop/disable a motor (sends MOTOR_STOP, comm type 0x04).
+    // If clearFaults is true, also clears any latched fault codes.
+    bool stopMotor(uint8_t motorId, bool clearFaults = false);
+
+    // Set the current physical position as the motor's mechanical zero point.
+    // After this, the motor reports its current position as 0.000 rad.
+    bool setMechanicalZero(uint8_t motorId);
+
+    // Write a float parameter to a motor (SET_SINGLE_PARAM, comm type 0x12).
+    // Used for LOC_REF (position command), SPD_REF, gains, etc.
+    bool writeFloatParam(uint8_t motorId, uint16_t paramIndex, float value);
+
+    // Write a uint8 parameter to a motor (SET_SINGLE_PARAM, comm type 0x12).
+    // Used for RUN_MODE, etc.
+    bool writeUint8Param(uint8_t motorId, uint16_t paramIndex, uint8_t value);
+
 private:
     // TWAI state
     bool _running = false;

@@ -532,7 +532,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
   }
 
   // Poll at 10Hz
-  setInterval(poll, 100);
+  setInterval(poll, 250);
   poll();
 })();
 </script>

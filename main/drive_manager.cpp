@@ -208,20 +208,9 @@ void DriveManager::driveTaskFunc(void* param) {
         float rightDrive = 0.0f;
 
         if (activeCtrl != nullptr) {
-            // Stick selection: use whichever stick has larger total deflection
-            float lMag = (float)(activeCtrl->lx) * (float)(activeCtrl->lx)
-                       + (float)(activeCtrl->ly) * (float)(activeCtrl->ly);
-            float rMag = (float)(activeCtrl->rx) * (float)(activeCtrl->rx)
-                       + (float)(activeCtrl->ry) * (float)(activeCtrl->ry);
-
-            float rawX, rawY;
-            if (lMag >= rMag) {
-                rawX = (float)activeCtrl->lx;
-                rawY = (float)activeCtrl->ly;
-            } else {
-                rawX = (float)activeCtrl->rx;
-                rawY = (float)activeCtrl->ry;
-            }
+            // Use right stick only for drive (left stick is reserved for motor control)
+            float rawX = (float)activeCtrl->rx;
+            float rawY = (float)activeCtrl->ry;
 
             // Normalize to [-1.0, 1.0]
             float normX = rawX / AXIS_MAX;
@@ -249,9 +238,8 @@ void DriveManager::driveTaskFunc(void* param) {
             if (rightDrive > 1.0f) { rightDrive = 1.0f; }
             if (rightDrive < -1.0f) { rightDrive = -1.0f; }
 
-            // Slow mode: hold L1 or R1 (paddle buttons) to limit output
-            bool slowMode = (activeCtrl->buttons & BUTTON_SHOULDER_L) != 0
-                         || (activeCtrl->buttons & BUTTON_SHOULDER_R) != 0;
+            // Slow mode: hold R3 (right stick click) to limit output
+            bool slowMode = (activeCtrl->buttons & BUTTON_THUMB_R) != 0;
             if (slowMode) {
                 leftDrive  *= DRIVE_SLOW_MODE_SCALE;
                 rightDrive *= DRIVE_SLOW_MODE_SCALE;

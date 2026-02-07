@@ -33,6 +33,10 @@ extern ControllerManager g_controllerManager;
 extern DriveManager g_driveManager;
 extern MotorManager g_motorManager;
 
+// Trim target positions (defined in sketch.cpp)
+extern float g_trimTargetLeft;
+extern float g_trimTargetRight;
+
 void DisplayManager::begin() {
     LOG_INFO(TAG, "Initializing display...");
 
@@ -67,8 +71,8 @@ void DisplayManager::update() {
     // Draw sections top to bottom
     // Layout budget for 240px display:
     //   Status bar:  28px
-    //   Controller: 107px (added miscButtons row)
-    //   Motors:      40px
+    //   Controller:  96px (added miscButtons row)
+    //   Motors:      51px (includes trim line)
     //   Outputs:     36px
     //   System:      29px
     //   Total:      240px
@@ -76,9 +80,9 @@ void DisplayManager::update() {
     drawStatusBar(y);
     y += 28;
     drawControllerInfo(y);
-    y += 107;
+    y += 96;
     drawMotorInfo(y);
-    y += 40;
+    y += 51;
     drawOutputInfo(y);
     y += 36;
     drawSystemInfo(y);
@@ -338,6 +342,35 @@ void DisplayManager::drawMotorInfo(int y) {
         sprite.print(posBuf);
 
         y += 11;
+    }
+
+    // Trim targets (always show when either L or R motor is assigned)
+    bool hasLeft = (g_motorManager.getLeftMotorId() > 0);
+    bool hasRight = (g_motorManager.getRightMotorId() > 0);
+    if (hasLeft || hasRight) {
+        sprite.setTextColor(COLOR_TEXT_DIM);
+        sprite.setCursor(4, y);
+        sprite.print("Trm");
+
+        if (hasLeft) {
+            sprite.setTextColor(COLOR_TEXT_DIM);
+            sprite.setCursor(28, y);
+            sprite.print("L:");
+            sprite.setTextColor(COLOR_TEXT);
+            char trimLBuf[10];
+            snprintf(trimLBuf, sizeof(trimLBuf), "%+.2f", g_trimTargetLeft);
+            sprite.print(trimLBuf);
+        }
+
+        if (hasRight) {
+            sprite.setTextColor(COLOR_TEXT_DIM);
+            sprite.setCursor(80, y);
+            sprite.print("R:");
+            sprite.setTextColor(COLOR_TEXT);
+            char trimRBuf[10];
+            snprintf(trimRBuf, sizeof(trimRBuf), "%+.2f", g_trimTargetRight);
+            sprite.print(trimRBuf);
+        }
     }
 }
 

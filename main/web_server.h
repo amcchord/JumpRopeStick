@@ -4,7 +4,7 @@
 // Web Server Module
 // =============================================================================
 // Uses ESP-IDF native httpd. Serves the embedded web UI at "/" and provides
-// a JSON status endpoint at /status that the UI polls at 10Hz.
+// a JSON status endpoint at /status that the UI polls at 4Hz.
 //
 // No WebSocket complexity - just simple HTTP GET requests.
 //

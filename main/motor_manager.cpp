@@ -199,6 +199,98 @@ void MotorManager::saveConfig() {
 }
 
 // =============================================================================
+// Motor Commands
+// =============================================================================
+
+bool MotorManager::enableMotor(uint8_t motorId) {
+    if (!_running) {
+        return false;
+    }
+
+    uint8_t data[8] = {0};
+    uint32_t id = buildExtendedId(RobstrideComm::MOTOR_ENABLE, motorId);
+    bool ok = sendMessage(id, data, 8);
+    if (ok) {
+        LOG_INFO(TAG, "Enabled motor %d", motorId);
+    }
+    return ok;
+}
+
+bool MotorManager::stopMotor(uint8_t motorId, bool clearFaults) {
+    if (!_running) {
+        return false;
+    }
+
+    uint8_t data[8] = {0};
+    if (clearFaults) {
+        data[0] = 1;
+    }
+    uint32_t id = buildExtendedId(RobstrideComm::MOTOR_STOP, motorId);
+    bool ok = sendMessage(id, data, 8);
+    if (ok) {
+        LOG_INFO(TAG, "Stopped motor %d (clearFaults=%d)", motorId, clearFaults);
+    }
+    return ok;
+}
+
+bool MotorManager::setMechanicalZero(uint8_t motorId) {
+    if (!_running) {
+        return false;
+    }
+
+    uint8_t data[8] = {0};
+    data[0] = 1;  // Required: data[0]=1 to confirm zero set
+    uint32_t id = buildExtendedId(RobstrideComm::SET_MECHANICAL_ZERO, motorId);
+    bool ok = sendMessage(id, data, 8);
+    if (ok) {
+        LOG_INFO(TAG, "Set mechanical zero for motor %d", motorId);
+    }
+    return ok;
+}
+
+bool MotorManager::writeFloatParam(uint8_t motorId, uint16_t paramIndex, float value) {
+    if (!_running) {
+        return false;
+    }
+
+    uint8_t data[8] = {0};
+    // data[0-1]: parameter index (little-endian)
+    data[0] = paramIndex & 0xFF;
+    data[1] = (paramIndex >> 8) & 0xFF;
+    // data[4-7]: float value (little-endian IEEE 754)
+    memcpy(&data[4], &value, sizeof(float));
+
+    uint32_t id = buildExtendedId(RobstrideComm::SET_SINGLE_PARAM, motorId);
+    bool ok = sendMessage(id, data, 8);
+    if (ok) {
+        LOG_DEBUG(TAG, "Wrote float param 0x%04X = %.4f to motor %d",
+                  paramIndex, value, motorId);
+    }
+    return ok;
+}
+
+bool MotorManager::writeUint8Param(uint8_t motorId, uint16_t paramIndex, uint8_t value) {
+    if (!_running) {
+        return false;
+    }
+
+    uint8_t data[8] = {0};
+    // data[0-1]: parameter index (little-endian)
+    data[0] = paramIndex & 0xFF;
+    data[1] = (paramIndex >> 8) & 0xFF;
+    // data[4]: uint8 value
+    data[4] = value;
+
+    uint32_t id = buildExtendedId(RobstrideComm::SET_SINGLE_PARAM, motorId);
+    bool ok = sendMessage(id, data, 8);
+    if (ok) {
+        LOG_DEBUG(TAG, "Wrote uint8 param 0x%04X = %d to motor %d",
+                  paramIndex, value, motorId);
+    }
+    return ok;
+}
+
+// =============================================================================
 // TWAI Initialization
 // =============================================================================
 
