@@ -56,10 +56,10 @@
 // Value is the fraction of full output (0.30 = 30%).
 #define DRIVE_SLOW_MODE_SCALE    0.30f
 
-// Drive output smoothing (exponential low-pass filter).
-// 0.0 = no smoothing (instant), 1.0 = maximum smoothing (never reaches target).
-// At 100Hz update rate, 0.15 gives a ~60ms rise time, 0.25 gives ~100ms.
-#define DRIVE_SMOOTHING          0.15f
+// Drive output smoothing (exponential low-pass filter, alpha coefficient).
+// 0.0 = output frozen (never moves), 1.0 = instant response (no smoothing).
+// At 100Hz update rate, 0.5 gives ~33ms rise to 90%, 0.7 gives ~10ms.
+#define DRIVE_SMOOTHING          0.50f
 
 // Standard RC servo PPM signal
 #define SERVO_MIN_US             1000    // Full reverse (or minimum throttle)
