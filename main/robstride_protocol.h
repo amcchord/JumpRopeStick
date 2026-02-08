@@ -166,6 +166,10 @@ struct RobstrideMotorStatus {
     float torque;        // Current torque in Nm
     float temperature;   // Temperature in Celsius
     float voltage;       // Bus voltage in Volts (from VBUS param read)
+    float ppSpeed;       // PP mode max speed (from PP_SPEED param readback, rad/s)
+    float ppAccel;       // PP mode acceleration (from PP_ACCELERATION readback, rad/s^2)
+    float limitSpd;      // General speed limit (from LIMIT_SPD param readback, rad/s)
+    float limitCur;      // Current limit (from LIMIT_CUR param readback, A)
     uint8_t errorCode;   // Error/fault code bits
     uint8_t mode;        // Motor state (0=reset, 1=calibration, 2=running)
     uint8_t runMode;     // Control mode (RobstrideMode, from RUN_MODE param)

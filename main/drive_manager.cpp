@@ -90,6 +90,22 @@ float DriveManager::getRightDrive() const {
     return _rightDrive;
 }
 
+void DriveManager::setInverted(bool inverted) {
+    _inverted = inverted;
+}
+
+void DriveManager::setOverride(float left, float right) {
+    _overrideLeft = left;
+    _overrideRight = right;
+    _overrideActive = true;
+}
+
+void DriveManager::clearOverride() {
+    _overrideActive = false;
+    _overrideLeft = 0.0f;
+    _overrideRight = 0.0f;
+}
+
 // ---------------------------------------------------------------------------
 // LEDC initialization
 // ---------------------------------------------------------------------------
@@ -186,6 +202,10 @@ void DriveManager::driveTaskFunc(void* param) {
     TickType_t lastWake = xTaskGetTickCount();
     unsigned long lastLogMs = millis();
 
+    // Smoothed drive output (persists across ticks for low-pass filter)
+    float smoothedLeft = 0.0f;
+    float smoothedRight = 0.0f;
+
     for (;;) {
         // Sleep until next 20ms tick (50Hz)
         vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(DRIVE_UPDATE_MS));
@@ -207,7 +227,12 @@ void DriveManager::driveTaskFunc(void* param) {
         float leftDrive = 0.0f;
         float rightDrive = 0.0f;
 
-        if (activeCtrl != nullptr) {
+        if (self->_overrideActive) {
+            // Drive override: use explicit values from self-righting / nose-down.
+            // Bypasses controller input and inversion -- the caller handles orientation.
+            leftDrive  = self->_overrideLeft;
+            rightDrive = self->_overrideRight;
+        } else if (activeCtrl != nullptr) {
             // Use right stick only for drive (left stick is reserved for motor control)
             float rawX = (float)activeCtrl->rx;
             float rawY = (float)activeCtrl->ry;
@@ -224,6 +249,13 @@ void DriveManager::driveTaskFunc(void* param) {
             float throttle = -normY;
             float turn = normX;
 
+            // If robot is upside-down, negate throttle so forward stays "forward"
+            // from the driver's perspective. Turn is unchanged (steering reverses
+            // physically when flipped, so the same stick direction stays correct).
+            if (self->_inverted) {
+                throttle = -throttle;
+            }
+
             // Apply expo curve to both axes independently
             throttle = applyExpo(throttle, DRIVE_EXPO);
             turn     = applyExpo(turn, DRIVE_EXPO);
@@ -238,25 +270,32 @@ void DriveManager::driveTaskFunc(void* param) {
             if (rightDrive > 1.0f) { rightDrive = 1.0f; }
             if (rightDrive < -1.0f) { rightDrive = -1.0f; }
 
-            // Slow mode: hold R3 (right stick click) to limit output
-            bool slowMode = (activeCtrl->buttons & BUTTON_THUMB_R) != 0;
-            if (slowMode) {
+            // Speed mode: default is slow (30%), hold R1 for full speed
+            bool fastMode = (activeCtrl->buttons & BUTTON_SHOULDER_R) != 0;
+            if (!fastMode) {
                 leftDrive  *= DRIVE_SLOW_MODE_SCALE;
                 rightDrive *= DRIVE_SLOW_MODE_SCALE;
             }
 
-            // Convert to servo pulse widths
-            leftUs  = driveToMicroseconds(leftDrive);
-            rightUs = driveToMicroseconds(rightDrive);
         }
+
+        // Apply exponential smoothing (low-pass filter).
+        // When no controller is connected, leftDrive/rightDrive are 0 and the
+        // filter naturally decays the output toward stop.
+        smoothedLeft  += DRIVE_SMOOTHING * (leftDrive  - smoothedLeft);
+        smoothedRight += DRIVE_SMOOTHING * (rightDrive - smoothedRight);
+
+        // Convert smoothed values to servo pulse widths
+        leftUs  = driveToMicroseconds(smoothedLeft);
+        rightUs = driveToMicroseconds(smoothedRight);
 
         // Write to servo hardware
         writeServo(LEDC_SERVO_LEFT_CH, leftUs);
         writeServo(LEDC_SERVO_RIGHT_CH, rightUs);
 
         // Update shared state for display/web (volatile writes)
-        self->_leftDrive = leftDrive;
-        self->_rightDrive = rightDrive;
+        self->_leftDrive = smoothedLeft;
+        self->_rightDrive = smoothedRight;
         self->_leftPulseUs = leftUs;
         self->_rightPulseUs = rightUs;
 
@@ -264,7 +303,7 @@ void DriveManager::driveTaskFunc(void* param) {
         if ((now - lastLogMs) >= 500) {
             lastLogMs = now;
             LOG_INFO(TAG, "PPM L=%uus R=%uus  drive L=%.2f R=%.2f",
-                     leftUs, rightUs, leftDrive, rightDrive);
+                     leftUs, rightUs, smoothedLeft, smoothedRight);
         }
     }
 }

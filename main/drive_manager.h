@@ -36,6 +36,17 @@ public:
     float getLeftDrive() const;
     float getRightDrive() const;
 
+    // Invert throttle direction (for upside-down driving).
+    // Thread-safe: called from CPU1, read from CPU0.
+    void setInverted(bool inverted);
+
+    // Override normal controller drive with explicit left/right values (-1..1).
+    // Used by self-righting and nose-down modes. Bypasses inversion.
+    void setOverride(float left, float right);
+
+    // Clear drive override, returning to normal controller input.
+    void clearOverride();
+
 private:
     bool _initialized = false;
 
@@ -44,6 +55,14 @@ private:
     volatile uint16_t _rightPulseUs = 1500;
     volatile float _leftDrive = 0.0f;
     volatile float _rightDrive = 0.0f;
+
+    // Drive inversion (for upside-down driving) -- written CPU1, read CPU0
+    volatile bool _inverted = false;
+
+    // Drive override -- written CPU1, read CPU0
+    volatile bool _overrideActive = false;
+    volatile float _overrideLeft = 0.0f;
+    volatile float _overrideRight = 0.0f;
 
     // Initialize LEDC timer and channels for servo PWM.
     bool initLedc();

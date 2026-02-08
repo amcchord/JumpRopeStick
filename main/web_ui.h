@@ -228,6 +228,24 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     text-decoration: none;
   }
   .settings-link:hover { color: #7eb8ff; }
+  .nav-bar {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .nav-bar a {
+    color: #7eb8ff;
+    text-decoration: none;
+    font-size: 0.9em;
+    padding: 6px 14px;
+    border-radius: 6px;
+    background: #1a1d27;
+    border: 1px solid #2a2d37;
+    transition: background 0.2s;
+  }
+  .nav-bar a:hover {
+    background: #2a4a7a;
+  }
   .can-motor-stats {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
@@ -248,6 +266,42 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     text-align: center;
     margin-top: 12px;
   }
+  .robot-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .robot-diagram svg {
+    max-width: 240px;
+    width: 100%;
+  }
+  .robot-diagram-legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    margin-top: 8px;
+    font-size: 0.8em;
+  }
+  .robot-diagram-legend span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #999;
+  }
+  .robot-diagram-legend .swatch {
+    width: 12px;
+    height: 4px;
+    border-radius: 2px;
+  }
+  .robot-diagram-pos {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+    margin-top: 6px;
+    font-family: 'SF Mono', monospace;
+    font-size: 0.85em;
+    color: #ccc;
+  }
 </style>
 </head>
 <body>
@@ -255,6 +309,11 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     <span class="status-dot" id="poll-dot"></span>
     JumpRopeStick
   </h1>
+
+  <div class="nav-bar">
+    <a href="/settings">Settings</a>
+    <a href="/log">Log Viewer</a>
+  </div>
 
   <div class="card">
     <h2>WiFi</h2>
@@ -271,6 +330,40 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
   <div class="card" id="can-card">
     <h2>CAN Motors <span id="can-count">(0)</span> <a href="/settings" class="settings-link">Settings</a></h2>
     <div id="can-content" style="color:#555;text-align:center;padding:10px;font-style:italic;">No motors detected</div>
+  </div>
+
+  <div class="card">
+    <h2>Robot Position</h2>
+    <div class="robot-diagram">
+      <svg viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg">
+        <!-- Reference circle -->
+        <circle cx="110" cy="110" r="75" fill="none" stroke="#2a2d37" stroke-width="1" stroke-dasharray="4,4"/>
+        <!-- Crosshairs -->
+        <line x1="110" y1="35" x2="110" y2="185" stroke="#1e2130" stroke-width="1"/>
+        <line x1="35" y1="110" x2="185" y2="110" stroke="#1e2130" stroke-width="1"/>
+        <!-- Cardinal labels -->
+        <text x="196" y="114" fill="#666" font-size="10" font-family="sans-serif" text-anchor="start">Front</text>
+        <text x="24" y="114" fill="#666" font-size="10" font-family="sans-serif" text-anchor="end">Back</text>
+        <text x="110" y="24" fill="#666" font-size="10" font-family="sans-serif" text-anchor="middle">Up</text>
+        <text x="110" y="206" fill="#666" font-size="10" font-family="sans-serif" text-anchor="middle">Down</text>
+        <!-- Left arm (orange, thicker) -->
+        <line id="arm-left" x1="110" y1="110" x2="185" y2="110" stroke="#e8963e" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
+        <!-- Right arm (blue, thinner) -->
+        <line id="arm-right" x1="110" y1="110" x2="185" y2="110" stroke="#7eb8ff" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+        <!-- Robot body -->
+        <rect x="97" y="99" width="26" height="22" rx="4" fill="#1a1d27" stroke="#555" stroke-width="1.5"/>
+        <!-- Forward arrow on body -->
+        <polygon points="123,110 118,106 118,114" fill="#666"/>
+      </svg>
+      <div class="robot-diagram-legend">
+        <span><span class="swatch" style="background:#e8963e"></span> Left</span>
+        <span><span class="swatch" style="background:#7eb8ff"></span> Right</span>
+      </div>
+      <div class="robot-diagram-pos">
+        <span id="arm-left-pos">L: -- rad</span>
+        <span id="arm-right-pos">R: -- rad</span>
+      </div>
+    </div>
   </div>
 
   <div class="card">
@@ -379,6 +472,8 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
       }
     }
 
+    updateRobotDiagram(d);
+
     if (d.drive) {
       updateMotorBar('l', parseFloat(d.drive.leftDrive) || 0, d.drive.left || 0);
       updateMotorBar('r', parseFloat(d.drive.rightDrive) || 0, d.drive.right || 0);
@@ -477,12 +572,54 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
       '<div class="can-motor-stats">' +
         '<div class="can-motor-stat"><div class="label">Voltage</div><div class="value">' + voltageStr + '</div></div>' +
         '<div class="can-motor-stat"><div class="label">Position</div><div class="value">' + parseFloat(m.position).toFixed(2) + ' rad</div></div>' +
-        '<div class="can-motor-stat"><div class="label">Velocity</div><div class="value">' + parseFloat(m.velocity).toFixed(1) + '</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Velocity</div><div class="value">' + parseFloat(m.velocity).toFixed(1) + ' rad/s</div></div>' +
         '<div class="can-motor-stat"><div class="label">Torque</div><div class="value">' + parseFloat(m.torque).toFixed(2) + ' Nm</div></div>' +
         '<div class="can-motor-stat"><div class="label">Temp</div><div class="value">' + parseFloat(m.temperature).toFixed(0) + '&deg;C</div></div>' +
+        '<div class="can-motor-stat"><div class="label">PP Speed</div><div class="value">' + parseFloat(m.ppSpeed || 0).toFixed(1) + ' rad/s</div></div>' +
+        '<div class="can-motor-stat"><div class="label">PP Accel</div><div class="value">' + parseFloat(m.ppAccel || 0).toFixed(0) + ' rad/s&sup2;</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Limit Spd</div><div class="value">' + parseFloat(m.limitSpd || 0).toFixed(1) + ' rad/s</div></div>' +
+        '<div class="can-motor-stat"><div class="label">Limit Cur</div><div class="value">' + parseFloat(m.limitCur || 0).toFixed(1) + ' A</div></div>' +
         '<div class="can-motor-stat"><div class="label">Mode</div><div class="value">' + runModeStr + '</div></div>' +
       '</div>' +
     '</div>';
+  }
+
+  function updateRobotDiagram(d) {
+    if (!d.motors || d.motors.length === 0) return;
+    var leftMotor = null;
+    var rightMotor = null;
+    // Try to find motors by explicit role assignment
+    for (var i = 0; i < d.motors.length; i++) {
+      if (d.motors[i].role === 'L') {
+        leftMotor = d.motors[i];
+      }
+      if (d.motors[i].role === 'R') {
+        rightMotor = d.motors[i];
+      }
+    }
+    // Fallback: use motor index 0 as left, index 1 as right
+    // (matches firmware resolveLeftMotorId / resolveRightMotorId behaviour)
+    if (!leftMotor && d.motors.length >= 1) {
+      leftMotor = d.motors[0];
+    }
+    if (!rightMotor && d.motors.length >= 2) {
+      rightMotor = d.motors[1];
+    }
+    // Calibrated scale: 180° per 3.54 motor-rad so "Back" preset (3.54) = straight back
+    // and "Up" preset (1.79) maps to ~91° which is effectively straight up.
+    var MOTOR_RAD_TO_DEG = 180.0 / 3.54;
+    var armLeft = document.getElementById('arm-left');
+    var armRight = document.getElementById('arm-right');
+    if (leftMotor && armLeft) {
+      var leftDeg = parseFloat(leftMotor.position) * MOTOR_RAD_TO_DEG;
+      armLeft.setAttribute('transform', 'rotate(' + leftDeg + ', 110, 110)');
+      setText('arm-left-pos', 'L: ' + parseFloat(leftMotor.position).toFixed(2) + ' rad');
+    }
+    if (rightMotor && armRight) {
+      var rightDeg = -parseFloat(rightMotor.position) * MOTOR_RAD_TO_DEG;
+      armRight.setAttribute('transform', 'rotate(' + rightDeg + ', 110, 110)');
+      setText('arm-right-pos', 'R: ' + parseFloat(rightMotor.position).toFixed(2) + ' rad');
+    }
   }
 
   function updateStickDot(canvasId, x, y) {
@@ -531,7 +668,7 @@ static const char WEB_UI_HTML[] PROGMEM = R"rawliteral(
     return b + ' B';
   }
 
-  // Poll at 10Hz
+  // Poll at 4Hz
   setInterval(poll, 250);
   poll();
 })();

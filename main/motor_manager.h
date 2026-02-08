@@ -85,6 +85,17 @@ public:
     // Used for RUN_MODE, etc.
     bool writeUint8Param(uint8_t motorId, uint16_t paramIndex, uint8_t value);
 
+    // Request an async parameter read from a motor (GET_SINGLE_PARAM).
+    // Returns false if a read is already pending. Result arrives via CAN
+    // and is stored in motor status (for known params) and _paramReadValue.
+    bool requestParamRead(uint8_t motorId, uint16_t paramIndex);
+
+    // Check if an async parameter read is still pending.
+    bool isParamReadPending() const;
+
+    // Get the float value from the last completed parameter read.
+    float getLastParamReadValue() const;
+
 private:
     // TWAI state
     bool _running = false;

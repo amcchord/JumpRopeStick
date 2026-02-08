@@ -703,6 +703,17 @@ void uni_bt_le_on_hci_event_le_meta(const uint8_t* packet, uint16_t size) {
             logi("Using con_handle: %#x\n", con_handle);
 
             uni_hid_device_set_connection_handle(device, con_handle);
+
+            // Request tight connection parameters for low-latency gamepad input.
+            // interval 10ms (0x0008 * 1.25ms), latency 0, supervision 2000ms (200 * 10ms)
+            logi("Requesting BLE conn param update: interval=10ms, latency=0\n");
+            gap_update_connection_parameters(con_handle,
+                0x0008,  // conn_interval_min: 10ms
+                0x0008,  // conn_interval_max: 10ms
+                0,       // conn_latency: 0
+                200      // supervision_timeout: 2000ms
+            );
+
             sm_request_pairing(con_handle);
 
             // Resume scanning
@@ -924,6 +935,25 @@ void uni_bt_le_setup(void) {
     device_information_service_client_init();
 
     gap_set_scan_parameters(0 /* type: passive */, 48 /* interval */, 48 /* window */);
+
+    // Request tight BLE connection parameters for low-latency gamepad input.
+    // Units: conn_scan_interval/window = 0.625ms, conn_interval = 1.25ms,
+    //        supervision_timeout = 10ms, ce_length = 0.625ms
+    // 0x0060 = 60ms scan interval, 0x0030 = 30ms scan window (defaults)
+    // 0x0008 = 10ms min interval, 0x0008 = 10ms max interval (pin to 10ms)
+    // latency = 0 (no skipped events), supervision = 200 (2000ms)
+    // min_ce = 0x0002 (1.25ms), max_ce = 0x0006 (3.75ms) - hints to controller
+    gap_set_connection_parameters(
+        0x0060,  // conn_scan_interval: 60ms
+        0x0030,  // conn_scan_window: 30ms
+        0x0008,  // conn_interval_min: 10ms (8 * 1.25ms)
+        0x0008,  // conn_interval_max: 10ms (8 * 1.25ms)
+        0,       // conn_latency: 0 (never skip events)
+        200,     // supervision_timeout: 2000ms (200 * 10ms)
+        0x0002,  // min_ce_length: 1.25ms
+        0x0006   // max_ce_length: 3.75ms
+    );
+    logi("BLE connection params set: interval=10ms, latency=0, timeout=2000ms\n");
 }
 
 void uni_bt_le_scan_start(void) {

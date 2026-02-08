@@ -636,6 +636,42 @@ void MotorManager::parseParameterResponse(uint8_t motorId, const uint8_t* data) 
                 _motorStatus[idx].runMode = (uint8_t)data[4];
             }
         }
+
+        // If this was a PP_SPEED read, store it
+        if (paramIndex == RobstrideParam::PP_SPEED) {
+            int idx = findMotorIndex(motorId);
+            if (idx >= 0) {
+                _motorStatus[idx].ppSpeed = _paramReadValue;
+                LOG_INFO(TAG, "Motor %d PP_SPEED readback: %.2f rad/s", motorId, _paramReadValue);
+            }
+        }
+
+        // If this was a PP_ACCELERATION read, store it
+        if (paramIndex == RobstrideParam::PP_ACCELERATION) {
+            int idx = findMotorIndex(motorId);
+            if (idx >= 0) {
+                _motorStatus[idx].ppAccel = _paramReadValue;
+                LOG_INFO(TAG, "Motor %d PP_ACCEL readback: %.2f rad/s^2", motorId, _paramReadValue);
+            }
+        }
+
+        // If this was a LIMIT_SPD read, store it
+        if (paramIndex == RobstrideParam::LIMIT_SPD) {
+            int idx = findMotorIndex(motorId);
+            if (idx >= 0) {
+                _motorStatus[idx].limitSpd = _paramReadValue;
+                LOG_INFO(TAG, "Motor %d LIMIT_SPD readback: %.2f rad/s", motorId, _paramReadValue);
+            }
+        }
+
+        // If this was a LIMIT_CUR read, store it
+        if (paramIndex == RobstrideParam::LIMIT_CUR) {
+            int idx = findMotorIndex(motorId);
+            if (idx >= 0) {
+                _motorStatus[idx].limitCur = _paramReadValue;
+                LOG_INFO(TAG, "Motor %d LIMIT_CUR readback: %.2f A", motorId, _paramReadValue);
+            }
+        }
     }
 }
 
@@ -800,6 +836,22 @@ void MotorManager::pollVoltage() {
     uint8_t motorId = _motorIds[_vbusPollMotorIndex];
     requestParameter(motorId, RobstrideParam::VBUS);
     _vbusPollMotorIndex++;
+}
+
+// =============================================================================
+// Public Parameter Read API
+// =============================================================================
+
+bool MotorManager::requestParamRead(uint8_t motorId, uint16_t paramIndex) {
+    return requestParameter(motorId, paramIndex);
+}
+
+bool MotorManager::isParamReadPending() const {
+    return _paramReadPending;
+}
+
+float MotorManager::getLastParamReadValue() const {
+    return _paramReadValue;
 }
 
 // =============================================================================

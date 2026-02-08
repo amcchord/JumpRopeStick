@@ -39,7 +39,9 @@ CONFIG_BTDM_CTRL_MODE_BTDM=y
 CONFIG_BTDM_CTRL_BR_EDR_MAX_ACL_CONN=5
 CONFIG_BTDM_CTRL_BLE_MAX_CONN=5
 CONFIG_BTDM_CTRL_BR_EDR_MAX_SYNC_CONN=0
-CONFIG_BTDM_CTRL_AUTO_LATENCY=y
+# Disable auto-latency so the BT controller doesn't dynamically add latency
+# (we want consistent low-latency for gamepad input)
+CONFIG_BTDM_CTRL_AUTO_LATENCY=n
 CONFIG_BTDM_CTRL_MODEM_SLEEP=n
 
 #
